@@ -1,8 +1,6 @@
-//! Security and encryption
+// Security and encryption
+//
+// This module will be fully implemented in Phase 18.
+// Placeholder for now to allow compilation.
 
-pub mod audit;
-pub mod auth;
-pub mod encryption;
-pub mod homomorphic;
-pub mod kms;
-pub mod zero_knowledge;
+// Placeholder - will be implemented in Phase 18

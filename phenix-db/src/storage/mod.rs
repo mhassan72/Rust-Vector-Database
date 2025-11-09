@@ -1,13 +1,6 @@
-//! Hierarchical storage layer
-//!
-//! Three-tier memory architecture:
-//! - Hot tier: RAM/NVMe (<1ms)
-//! - Warm tier: NVMe/SSD (1-10ms)
-//! - Cold tier: Object storage (10-100ms)
+// Storage layer
+//
+// This module will be fully implemented in Phase 19.
+// Placeholder for now to allow compilation.
 
-pub mod cold_tier;
-pub mod hot_tier;
-pub mod persistence;
-pub mod tiering;
-pub mod wal;
-pub mod warm_tier;
+// Placeholder - will be implemented in Phase 19

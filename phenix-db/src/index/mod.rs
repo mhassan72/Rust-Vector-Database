@@ -1,7 +1,6 @@
-//! Indexing and search
+// Indexing and search
+//
+// This module will be fully implemented in Phases 3-4.
+// Placeholder for now to allow compilation.
 
-pub mod gpu;
-pub mod polynomial_tree;
-pub mod probabilistic_graph;
-pub mod simd;
-pub mod vector_transform;
+// Placeholder - will be implemented in Phases 3-4

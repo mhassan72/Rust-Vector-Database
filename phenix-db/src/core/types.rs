@@ -1,22 +1,34 @@
-//! Core type definitions for Phenix-DB
+// Core type aliases for Phenix-DB
+//
+// These type aliases provide semantic meaning and type safety throughout the system.
+// They are based on UUID v7 for distributed generation with temporal ordering.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use uuid::Uuid;
 
-/// Unique identifier for an entity
+/// Unique identifier for an Entity in the memory substrate
+/// 
+/// EntityId uses UUID v7 format for:
+/// - Distributed generation without coordination
+/// - Temporal ordering (creation time embedded)
+/// - 128-bit uniqueness guarantee
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EntityId(pub Uuid);
+pub struct EntityId(uuid::Uuid);
 
 impl EntityId {
-    /// Create a new random entity ID
+    /// Generate a new EntityId with temporal ordering
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        Self(uuid::Uuid::now_v7())
     }
 
-    /// Create an entity ID from a UUID
-    pub fn from_uuid(uuid: Uuid) -> Self {
+    /// Create EntityId from existing UUID
+    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
         Self(uuid)
+    }
+
+    /// Get the underlying UUID
+    pub fn as_uuid(&self) -> &uuid::Uuid {
+        &self.0
     }
 }
 
@@ -32,14 +44,27 @@ impl fmt::Display for EntityId {
     }
 }
 
-/// Unique identifier for a node in the distributed system
+/// Unique identifier for a Node in the distributed consciousness system
+/// 
+/// NodeId represents a physical or logical node in the cluster.
+/// Each node maintains partial awareness of the global memory graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NodeId(pub Uuid);
+pub struct NodeId(uuid::Uuid);
 
 impl NodeId {
-    /// Create a new random node ID
+    /// Generate a new NodeId
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        Self(uuid::Uuid::now_v7())
+    }
+
+    /// Create NodeId from existing UUID
+    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the underlying UUID
+    pub fn as_uuid(&self) -> &uuid::Uuid {
+        &self.0
     }
 }
 
@@ -49,66 +74,121 @@ impl Default for NodeId {
     }
 }
 
-/// Unique identifier for a shard
+impl fmt::Display for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Unique identifier for a Shard in the memory substrate
+/// 
+/// ShardId represents a logical partition of the memory space.
+/// Semantically similar entities are co-located in the same shard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ShardId(pub u64);
+pub struct ShardId(uuid::Uuid);
 
 impl ShardId {
-    /// Create a new shard ID
-    pub fn new(id: u64) -> Self {
-        Self(id)
+    /// Generate a new ShardId
+    pub fn new() -> Self {
+        Self(uuid::Uuid::now_v7())
+    }
+
+    /// Create ShardId from existing UUID
+    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the underlying UUID
+    pub fn as_uuid(&self) -> &uuid::Uuid {
+        &self.0
     }
 }
 
-/// Unique identifier for a semantic cluster
+impl Default for ShardId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for ShardId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Unique identifier for a semantic Cluster in the memory substrate
+/// 
+/// ClusterId represents a group of semantically similar entities.
+/// Entities with similarity >0.85 are grouped into the same cluster.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ClusterId(pub u64);
+pub struct ClusterId(uuid::Uuid);
 
 impl ClusterId {
-    /// Create a new cluster ID
-    pub fn new(id: u64) -> Self {
-        Self(id)
+    /// Generate a new ClusterId
+    pub fn new() -> Self {
+        Self(uuid::Uuid::now_v7())
+    }
+
+    /// Create ClusterId from existing UUID
+    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the underlying UUID
+    pub fn as_uuid(&self) -> &uuid::Uuid {
+        &self.0
     }
 }
 
-/// Unique identifier for a transaction
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TransactionId(pub u64);
-
-impl TransactionId {
-    /// Create a new transaction ID
-    pub fn new(id: u64) -> Self {
-        Self(id)
-    }
-}
-
-/// Timestamp in microseconds since Unix epoch
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct Timestamp(pub u64);
-
-impl Timestamp {
-    /// Get the current timestamp
-    pub fn now() -> Self {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards");
-        Self(duration.as_micros() as u64)
-    }
-
-    /// Create a timestamp from microseconds
-    pub fn from_micros(micros: u64) -> Self {
-        Self(micros)
-    }
-
-    /// Get the timestamp as microseconds
-    pub fn as_micros(&self) -> u64 {
-        self.0
-    }
-}
-
-impl Default for Timestamp {
+impl Default for ClusterId {
     fn default() -> Self {
-        Self::now()
+        Self::new()
+    }
+}
+
+impl fmt::Display for ClusterId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_entity_id_creation() {
+        let id1 = EntityId::new();
+        let id2 = EntityId::new();
+        assert_ne!(id1, id2, "EntityIds should be unique");
+    }
+
+    #[test]
+    fn test_node_id_creation() {
+        let id1 = NodeId::new();
+        let id2 = NodeId::new();
+        assert_ne!(id1, id2, "NodeIds should be unique");
+    }
+
+    #[test]
+    fn test_shard_id_creation() {
+        let id1 = ShardId::new();
+        let id2 = ShardId::new();
+        assert_ne!(id1, id2, "ShardIds should be unique");
+    }
+
+    #[test]
+    fn test_cluster_id_creation() {
+        let id1 = ClusterId::new();
+        let id2 = ClusterId::new();
+        assert_ne!(id1, id2, "ClusterIds should be unique");
+    }
+
+    #[test]
+    fn test_id_serialization() {
+        let id = EntityId::new();
+        let serialized = serde_json::to_string(&id).unwrap();
+        let deserialized: EntityId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(id, deserialized, "EntityId should serialize/deserialize correctly");
     }
 }

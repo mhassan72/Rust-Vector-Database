@@ -1,6 +1,6 @@
-//! API layer
+// API layer
+//
+// This module will be fully implemented in Phase 20.
+// Placeholder for now to allow compilation.
 
-pub mod cognitive_query;
-pub mod grpc;
-pub mod protocol;
-pub mod rest;
+// Placeholder - will be implemented in Phase 20

@@ -1,6 +1,6 @@
-//! Adaptive learning system
+// Adaptive learning
+//
+// This module will be fully implemented in Phase 12.
+// Placeholder for now to allow compilation.
 
-pub mod access_predictor;
-pub mod feedback_loop;
-pub mod pattern_learner;
-pub mod semantic_drift;
+// Placeholder - will be implemented in Phase 12

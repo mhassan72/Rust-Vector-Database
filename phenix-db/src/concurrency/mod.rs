@@ -1,6 +1,6 @@
-//! Lock-free concurrency
+// Lock-free concurrency
+//
+// This module will be fully implemented in Phase 10.
+// Placeholder for now to allow compilation.
 
-pub mod atomic_ops;
-pub mod lockfree;
-pub mod mvcc_engine;
-pub mod transaction_coordinator;
+// Placeholder - will be implemented in Phase 10

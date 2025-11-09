@@ -1,6 +1,6 @@
-//! Observability system
+// Observability
+//
+// This module will be fully implemented in Phase 21.
+// Placeholder for now to allow compilation.
 
-pub mod logging;
-pub mod mathematical_monitors;
-pub mod metrics;
-pub mod tracing;
+// Placeholder - will be implemented in Phase 21

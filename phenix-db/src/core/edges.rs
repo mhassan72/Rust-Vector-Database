@@ -1,11 +1,27 @@
-//! Edge data structures for graph relationships
+// Probabilistic edge management with PGM (Probabilistic Graph Memory) fields
+//
+// Edges represent relationships between entities that evolve based on access patterns.
+// The probability field is updated using Kolmogorov probability theory.
 
-use super::{EntityId, Timestamp};
+use crate::core::types::EntityId;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Basic edge between entities
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Edge represents a probabilistic relationship between two entities
+/// 
+/// Mathematical properties (PGM):
+/// - Probability: Weight in range [0.0, 1.0], updated on co-access
+/// - Access count: Atomic counter for lock-free updates
+/// - Last accessed: Timestamp for decay calculations
+/// 
+/// Probability update formula:
+/// w_new = w_old + α * (co_access_frequency - w_old)
+/// where α is learning rate (default 0.1)
+/// 
+/// Normalization constraint:
+/// Σ P(edges from node_i) = 1.0 (within 0.001 tolerance)
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Edge {
     /// Source entity ID
     pub source_id: EntityId,
@@ -13,69 +29,97 @@ pub struct Edge {
     /// Target entity ID
     pub target_id: EntityId,
     
-    /// Edge label/type
+    /// Edge label (relationship type)
     pub label: String,
     
-    /// Edge weight
+    /// Static weight (user-defined or initial weight)
     pub weight: f32,
     
-    /// Optional metadata
+    /// Optional metadata for the edge
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
-}
-
-/// Probabilistic edge for PGM (Probabilistic Graph Memory)
-#[derive(Debug)]
-pub struct ProbabilisticEdge {
-    /// Source entity ID
-    pub source_id: EntityId,
     
-    /// Target entity ID
-    pub target_id: EntityId,
+    // PGM (Probabilistic Graph Memory) fields
     
-    /// Edge label/type
-    pub label: String,
-    
-    /// Raw weight
-    pub weight: f32,
-    
-    /// Normalized probability (0.0-1.0)
+    /// Probabilistic weight learned from access patterns
+    /// Range: [0.0, 1.0]
+    /// Updated on co-access within 100ms time window
     pub probability: f32,
     
-    /// Lock-free access counter
+    /// Access count for learning (atomic for lock-free updates)
+    /// Note: Serialization converts to u64, deserialization creates new AtomicU64
+    #[serde(
+        serialize_with = "serialize_atomic_u64",
+        deserialize_with = "deserialize_atomic_u64"
+    )]
     pub access_count: AtomicU64,
     
-    /// Last accessed timestamp (atomic)
+    /// Last accessed timestamp (Unix epoch milliseconds)
+    /// Used for decay calculations and pruning
+    #[serde(
+        serialize_with = "serialize_atomic_u64",
+        deserialize_with = "deserialize_atomic_u64"
+    )]
     pub last_accessed: AtomicU64,
-    
-    /// Co-access time window in milliseconds
-    pub co_access_window_ms: u64,
 }
 
-impl ProbabilisticEdge {
-    /// Create a new probabilistic edge
+// Manual Clone implementation because AtomicU64 doesn't implement Clone
+impl Clone for Edge {
+    fn clone(&self) -> Self {
+        Self {
+            source_id: self.source_id,
+            target_id: self.target_id,
+            label: self.label.clone(),
+            weight: self.weight,
+            metadata: self.metadata.clone(),
+            probability: self.probability,
+            access_count: AtomicU64::new(self.access_count.load(Ordering::SeqCst)),
+            last_accessed: AtomicU64::new(self.last_accessed.load(Ordering::SeqCst)),
+        }
+    }
+}
+
+impl Edge {
+    /// Create a new Edge with initial probability
+    /// 
+    /// # Arguments
+    /// * `source_id` - Source entity ID
+    /// * `target_id` - Target entity ID
+    /// * `label` - Edge label (relationship type)
+    /// * `weight` - Initial static weight
+    /// * `metadata` - Optional metadata
+    /// 
+    /// # Returns
+    /// * Edge with probability initialized to weight, access_count = 0
     pub fn new(
         source_id: EntityId,
         target_id: EntityId,
         label: String,
-        initial_weight: f32,
+        weight: f32,
+        metadata: Option<serde_json::Value>,
     ) -> Self {
+        // Ensure weight is in valid range
+        let weight = weight.clamp(0.0, 1.0);
+        
         Self {
             source_id,
             target_id,
             label,
-            weight: initial_weight,
-            probability: initial_weight,
+            weight,
+            metadata,
+            probability: weight, // Initialize probability to weight
             access_count: AtomicU64::new(0),
-            last_accessed: AtomicU64::new(Timestamp::now().as_micros()),
-            co_access_window_ms: 100, // Default 100ms window
+            last_accessed: AtomicU64::new(current_timestamp_ms()),
         }
     }
 
     /// Record an access to this edge (lock-free)
+    /// 
+    /// Increments access_count and updates last_accessed timestamp atomically.
+    /// This is called when entities are co-accessed within the time window.
     pub fn record_access(&self) {
         self.access_count.fetch_add(1, Ordering::SeqCst);
-        self.last_accessed
-            .store(Timestamp::now().as_micros(), Ordering::SeqCst);
+        self.last_accessed.store(current_timestamp_ms(), Ordering::SeqCst);
     }
 
     /// Get the current access count
@@ -83,25 +127,108 @@ impl ProbabilisticEdge {
         self.access_count.load(Ordering::SeqCst)
     }
 
-    /// Get the last accessed timestamp
-    pub fn get_last_accessed(&self) -> Timestamp {
-        Timestamp::from_micros(self.last_accessed.load(Ordering::SeqCst))
+    /// Get the last accessed timestamp (milliseconds since Unix epoch)
+    pub fn get_last_accessed(&self) -> u64 {
+        self.last_accessed.load(Ordering::SeqCst)
     }
 
-    /// Update probability (should be called during weight normalization)
-    pub fn update_probability(&mut self, new_probability: f32) {
-        self.probability = new_probability.clamp(0.0, 1.0);
+    /// Update probability based on learning algorithm
+    /// 
+    /// Formula: w_new = w_old + α * (target - w_old)
+    /// 
+    /// # Arguments
+    /// * `target` - Target probability (e.g., normalized co-access frequency)
+    /// * `learning_rate` - Learning rate α (default 0.1)
+    /// 
+    /// # Returns
+    /// * New probability value
+    pub fn update_probability(&mut self, target: f32, learning_rate: f32) -> f32 {
+        let target = target.clamp(0.0, 1.0);
+        let learning_rate = learning_rate.clamp(0.0, 1.0);
+        
+        // Apply learning update
+        self.probability = self.probability + learning_rate * (target - self.probability);
+        self.probability = self.probability.clamp(0.0, 1.0);
+        
+        self.probability
     }
 
-    /// Update weight based on co-access (learning algorithm)
-    pub fn update_weight(&mut self, learning_rate: f32, co_accessed: bool) {
-        if co_accessed {
-            self.weight = (self.weight + learning_rate).min(1.0);
-        } else {
-            // Decay weight slightly if not co-accessed
-            self.weight = (self.weight - learning_rate * 0.1).max(0.0);
+    /// Check if edge should be pruned based on threshold and inactivity
+    /// 
+    /// Pruning criteria:
+    /// - Probability below threshold (default 0.01)
+    /// - No access for 30 days
+    /// 
+    /// # Arguments
+    /// * `threshold` - Minimum probability to keep edge
+    /// * `inactivity_days` - Days of inactivity before pruning
+    /// 
+    /// # Returns
+    /// * true if edge should be pruned
+    pub fn should_prune(&self, threshold: f32, inactivity_days: u64) -> bool {
+        // Check probability threshold
+        if self.probability < threshold {
+            return true;
         }
+        
+        // Check inactivity
+        let last_accessed = self.get_last_accessed();
+        let current = current_timestamp_ms();
+        let inactivity_ms = inactivity_days * 24 * 60 * 60 * 1000;
+        
+        if current - last_accessed > inactivity_ms {
+            return true;
+        }
+        
+        false
     }
+
+    /// Decay probability over time (for edges not accessed)
+    /// 
+    /// Applies exponential decay: p_new = p_old * exp(-λ * Δt)
+    /// 
+    /// # Arguments
+    /// * `decay_rate` - Decay rate λ (default 0.01 per day)
+    /// 
+    /// # Returns
+    /// * New probability after decay
+    pub fn apply_decay(&mut self, decay_rate: f32) -> f32 {
+        let last_accessed = self.get_last_accessed();
+        let current = current_timestamp_ms();
+        let days_elapsed = (current - last_accessed) as f32 / (24.0 * 60.0 * 60.0 * 1000.0);
+        
+        // Exponential decay
+        let decay_factor = (-decay_rate * days_elapsed).exp();
+        self.probability *= decay_factor;
+        self.probability = self.probability.clamp(0.0, 1.0);
+        
+        self.probability
+    }
+}
+
+/// Get current timestamp in milliseconds since Unix epoch
+fn current_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis() as u64
+}
+
+/// Serialize AtomicU64 as u64
+fn serialize_atomic_u64<S>(atomic: &AtomicU64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_u64(atomic.load(Ordering::SeqCst))
+}
+
+/// Deserialize u64 as AtomicU64
+fn deserialize_atomic_u64<'de, D>(deserializer: D) -> Result<AtomicU64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    Ok(AtomicU64::new(value))
 }
 
 #[cfg(test)]
@@ -109,38 +236,141 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_probabilistic_edge_creation() {
+    fn test_edge_creation() {
         let source = EntityId::new();
         let target = EntityId::new();
-        let edge = ProbabilisticEdge::new(source, target, "relates_to".to_string(), 0.5);
+        let edge = Edge::new(
+            source,
+            target,
+            "related_to".to_string(),
+            0.5,
+            None,
+        );
         
+        assert_eq!(edge.source_id, source);
+        assert_eq!(edge.target_id, target);
+        assert_eq!(edge.label, "related_to");
         assert_eq!(edge.weight, 0.5);
         assert_eq!(edge.probability, 0.5);
         assert_eq!(edge.get_access_count(), 0);
     }
 
     #[test]
-    fn test_edge_access_recording() {
-        let source = EntityId::new();
-        let target = EntityId::new();
-        let edge = ProbabilisticEdge::new(source, target, "relates_to".to_string(), 0.5);
+    fn test_record_access() {
+        let edge = Edge::new(
+            EntityId::new(),
+            EntityId::new(),
+            "test".to_string(),
+            0.5,
+            None,
+        );
+        
+        assert_eq!(edge.get_access_count(), 0);
         
         edge.record_access();
-        edge.record_access();
+        assert_eq!(edge.get_access_count(), 1);
         
+        edge.record_access();
         assert_eq!(edge.get_access_count(), 2);
     }
 
     #[test]
-    fn test_weight_update() {
-        let source = EntityId::new();
-        let target = EntityId::new();
-        let mut edge = ProbabilisticEdge::new(source, target, "relates_to".to_string(), 0.5);
+    fn test_update_probability() {
+        let mut edge = Edge::new(
+            EntityId::new(),
+            EntityId::new(),
+            "test".to_string(),
+            0.5,
+            None,
+        );
         
-        edge.update_weight(0.1, true);
-        assert!((edge.weight - 0.6).abs() < 0.0001);
+        // Update towards 0.8 with learning rate 0.1
+        // new = 0.5 + 0.1 * (0.8 - 0.5) = 0.5 + 0.03 = 0.53
+        let new_prob = edge.update_probability(0.8, 0.1);
+        assert!((new_prob - 0.53).abs() < 1e-6);
+        assert_eq!(edge.probability, new_prob);
+    }
+
+    #[test]
+    fn test_probability_bounds() {
+        let mut edge = Edge::new(
+            EntityId::new(),
+            EntityId::new(),
+            "test".to_string(),
+            0.5,
+            None,
+        );
         
-        edge.update_weight(0.1, false);
-        assert!((edge.weight - 0.59).abs() < 0.0001);
+        // Try to update beyond bounds
+        edge.update_probability(1.5, 0.5); // Should clamp to 1.0
+        assert!(edge.probability <= 1.0);
+        
+        edge.update_probability(-0.5, 0.5); // Should clamp to 0.0
+        assert!(edge.probability >= 0.0);
+    }
+
+    #[test]
+    fn test_should_prune_threshold() {
+        let mut edge = Edge::new(
+            EntityId::new(),
+            EntityId::new(),
+            "test".to_string(),
+            0.005,
+            None,
+        );
+        
+        edge.probability = 0.005;
+        
+        // Should prune if below threshold
+        assert!(edge.should_prune(0.01, 30));
+        
+        // Should not prune if above threshold
+        edge.probability = 0.02;
+        assert!(!edge.should_prune(0.01, 30));
+    }
+
+    #[test]
+    fn test_apply_decay() {
+        let mut edge = Edge::new(
+            EntityId::new(),
+            EntityId::new(),
+            "test".to_string(),
+            1.0,
+            None,
+        );
+        
+        edge.probability = 1.0;
+        
+        // Simulate 1 day passing by setting last_accessed to 1 day ago
+        let one_day_ago = current_timestamp_ms() - (24 * 60 * 60 * 1000);
+        edge.last_accessed.store(one_day_ago, Ordering::SeqCst);
+        
+        // Apply decay with rate 0.01 per day
+        // new = 1.0 * exp(-0.01 * 1) ≈ 0.99
+        let new_prob = edge.apply_decay(0.01);
+        assert!((new_prob - 0.99).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_edge_serialization() {
+        let edge = Edge::new(
+            EntityId::new(),
+            EntityId::new(),
+            "test".to_string(),
+            0.5,
+            Some(serde_json::json!({"key": "value"})),
+        );
+        
+        edge.record_access();
+        edge.record_access();
+        
+        let serialized = serde_json::to_string(&edge).unwrap();
+        let deserialized: Edge = serde_json::from_str(&serialized).unwrap();
+        
+        assert_eq!(edge.source_id, deserialized.source_id);
+        assert_eq!(edge.target_id, deserialized.target_id);
+        assert_eq!(edge.label, deserialized.label);
+        assert_eq!(edge.probability, deserialized.probability);
+        assert_eq!(edge.get_access_count(), deserialized.get_access_count());
     }
 }
