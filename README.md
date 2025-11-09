@@ -289,9 +289,14 @@ We welcome contributions! Please see [CONTRIBUTING.md](docs/CONTRIBUTING.md) for
 
 ### Getting Started
 - **[Documentation Index](docs/index.md)** - Complete documentation overview
+- **[Getting Started Guide](docs/development/getting-started.md)** - Set up your development environment
 - **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to Phenix-DB
 - **[Development TODO](docs/TODO.md)** - Current development status and roadmap
+
+### Development Guides
 - **[Code Organization](docs/development/code-organization.md)** - Module structure and design patterns
+- **[Testing Guidelines](docs/development/testing.md)** - Comprehensive testing strategy
+- **[Configuration Guide](docs/development/configuration.md)** - Configuration options and tuning
 
 ### Mathematical Reasoning
 - **[Mathematical Reasoning Overview](docs/reasoning/README.md)** - Complete guide to mathematical foundations
